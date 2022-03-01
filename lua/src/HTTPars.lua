@@ -1,7 +1,7 @@
 -- @Author: admin
 -- @Date:   2022-02-27 22:23:37
 -- @Last Modified by:   admin
--- @Last Modified time: 2022-02-28 09:39:09
+-- @Last Modified time: 2022-03-01 16:03:13
 
 local string = require('string')
 
@@ -41,11 +41,17 @@ end
 local function parseProtocolLine(line)
     local protocol = {}
     local list = splitAsWhiteSpace(line)
-    local versionOrProtocol = string.split(list[3],'/')
-    protocol['method'] = list[1]
-    protocol['path'] = list[2]
-    protocol['protocol'] = versionOrProtocol[1]
-    protocol['version'] = versionOrProtocol[2]
+    if #list < 3 then
+      protocol['protocol'] = list[1]
+      protocol['status'] = tonumber(list[2])
+    else
+      local versionOrProtocol = string.split(list[3],'/')
+      protocol['method'] = list[1]
+      protocol['path'] = list[2]
+      protocol['protocol'] = versionOrProtocol[1]
+      protocol['version'] = versionOrProtocol[2]
+    end
+
     return protocol
 end
 
@@ -64,6 +70,49 @@ local HTTParse = {
         query = {}
     }
 }
+
+local Cookies = {
+  query={},
+  cookies = ""
+}
+
+---@param cookies string
+function Cookies:new(cookies)
+  local newCookies = setmetatable({cookies=cookies,query= {}},{__index=Cookies})
+  newCookies.parse(newCookies)
+  return newCookies
+end
+
+
+function Cookies:parse(cookies)
+  self.cookies = string.trim(self.cookies)
+  local cookiesList = string.split(self.cookies,";")
+  for _,value in ipairs(cookiesList) do
+    local keyAndValue = string.split(value,"=")
+    self.query[keyAndValue[1]] = keyAndValue[2]
+  end
+end
+
+---@param key   string
+function Cookies:getCookie(key)
+  return self.query[key]
+end
+
+---@param key   string
+---@param value string
+function Cookies:setCookie(key,value)
+  self.query[key] =value
+  self.cookies = self.toString()
+end
+
+function Cookies:toString()
+  local cookies = ""
+  for key,value in pairs(self.query) do
+    cookies = cookies..key.."="..value..";"
+  end
+  return string.sub(cookies,1,#cookies-1)
+end
+
 function HTTParse:getHeader(key)
     return self.HTTP.headers[key]
 end
@@ -94,27 +143,51 @@ function HTTParse:parseQuery()
     end
 end
 
+---@param t table<T> target
+function countTable(t)
+  local length = 0
+  for _ in pairs(t) do
+    length = length + 1
+  end
+  return length
+end
+
 ---@param stream string The http stream
 function HTTParse:new(stream)
+    local HTTP = {
+      protocol = "",
+      version = 0,
+      headers = {},
+      method = "",
+      path = "",
+      query = {}
+    }
+    local Hparse = setmetatable({HTTP = HTTP},{__index = HTTParse});
     local lines = string.split(stream,"\r\n")
     for index,line in ipairs(lines) do
         if string.indexOf(line,":") ~= -1 then
           local header = parseHeaderLines(line)
-          self.HTTP.headers[header[1]] = string.trim(header[2])
+          Hparse.HTTP.headers[header[1]] = string.trim(header[2])
         else
             if index == 1 then
                 local firstLine = parseProtocolLine(line)
-                self.HTTP.method = firstLine.method
-                self.HTTP.version = firstLine.version
-                self.HTTP.protocol = firstLine.protocol
-                self.HTTP.path = firstLine.path
+                if countTable(firstLine) < 3 then
+                  Hparse.HTTP.protocol = firstLine.protocol
+                  Hparse.HTTP['status'] = firstLine.status
+                else
+                  Hparse.HTTP.method = firstLine.method
+                  Hparse.HTTP.version = firstLine.version
+                  Hparse.HTTP.protocol = firstLine.protocol
+                  Hparse.HTTP.path = firstLine.path
+                end
             end
         end
     end
-    if string.indexOf(self.HTTP.path,'?') ~= -1 then
-        self.parseQuery(self)
+    if string.indexOf(Hparse.HTTP.path,'?') ~= -1 then
+        Hparse.parseQuery()
     end
-    return self
+    return Hparse
 end
 
-return HTTParse;
+
+return {HTTParse = HTTParse,Cookies=Cookies};
